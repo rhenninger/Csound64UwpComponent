@@ -1,0 +1,156 @@
+namespace Csound64UwpComponent
+{
+	enum InternalSamplePrecision {SinglePrecision, DoublePrecision};
+
+	enum CsoundStatus {
+		ExitJmpSuccess = 256,/* Compilation or performance aborted, but not as a result of an error
+								(e.g. --help, or running an utility with -U). */
+		Finished = 1,		/* Returned by Perform when score finishes without error */
+		OK=0,				/* Completed successfully, or returned by Perform when score is still running. */
+		UnspecifiedError=-1,/* Unspecified failure. */
+		InitTimeError=-2,	/* Failed during initialization. */
+		PerformanceError=-3,/* Failed during performance. */
+		MemoryError=-4,		/* Failed to allocate requested memory. */
+		Signal=-5			/* Termination requested by SIGINT or SIGTERM. */
+	};
+
+	[flags]
+	enum MessageLevels {
+		None = 0x00000000,
+		Amplitudes      = 0x00000001,
+		RangeViolations = 0x00000002,
+		Warnings		= 0x00000004,
+		BenchmarkInfo	= 0x00000080
+	};
+
+	[flags]
+	enum MessageAttrs {
+		Default			= 0x00000000,
+		Error			= 0x00001000,
+		Orchestra		= 0x00002000,
+		Realtime		= 0x00003000,
+		Warning			= 0x00004000,
+		Stdout			= 0x00005000
+	};
+
+	enum ScoreEventTypes {
+		Note = 'i',
+		Function = 'f',
+		Advance='a',
+		Mute='q',
+		EndTime='e',
+		Section='s',
+		Tempo='t',
+		Warp='v',
+		NameMarker='m',
+		RepeatMarker='r',
+		SkipRemaining='x'
+	};
+
+	enum DisplayOptions {None= 0, Ascii=1, Postscript=2, }; //-d or -g or -G
+
+	[flags]
+	enum InstanceKillModes {
+		None = 0,
+		OldestOnly  = 1,
+		NewestOnly  = 2,
+		All			= 3,
+		ExactMatch  = 4,
+		InfiniteOnly = 8
+	};
+	
+
+
+	runtimeclass CsoundParameters
+	{
+		CsoundParameters();
+
+		Boolean DebugMode;
+		MessageLevels MessageLevel;
+		
+		Int32 BufferFrames;
+		Int32 HardwareBufferFrames;
+		Int32 Tempo;
+
+		Boolean IsSampleAccurate;
+
+		Double SampleRateOverride;
+		Double e0dbfsOverride;
+		Int32 KsmpsOverride;
+		Int32 NchnlsOverride;
+		Int32 InputNchnlsOverride;
+
+
+	}
+
+	runtimeclass CsoundTable
+	{
+		CsoundTable();
+		Int32 Number { get; };
+		Int32 Size { get; };
+		Int32 GenNbr { get; };
+		Boolean IsNormalized { get; };
+		Double[] Parameters { get; };
+		Double[] Contents;
+	}
+
+	/* Possible events: csound playing ended (1), error/warning messages received, */
+		
+	[default_interface]
+	runtimeclass Csound64 : Windows.Foundation.IClosable
+	{
+		Csound64();
+		Int32 Version { get; };
+		Int32 ApiVersion { get; };
+		InternalSamplePrecision SamplePrecision{ get; };
+
+		UInt32 Ksmps { get; };
+		UInt32 Nchnls { get; };
+		UInt32 NchnlsInput { get; };
+
+		Double Sr{ get; };
+		Double Kr{ get; };
+		Double e0dBFS { get; };
+		Double A4{ get; };
+
+		Boolean Debug;
+		MessageLevels MessageLevel;
+		Boolean HasMessages();
+		String NextMessage(out MessageAttrs attr);
+
+		CsoundParameters GetCsoundParameters();
+		Boolean SetSingleParameter(String argStr);
+		void SetCsoundParameters(CsoundParameters params);
+
+		void Reset();
+		CsoundStatus CompileCsd(String csd);
+		CsoundStatus CompileOrc(String orc);
+		Double EvalCode(String code);
+		CsoundStatus ReadScore(String sco);
+
+		CsoundStatus Start(Int32 frameCount);
+		Boolean IsScorePending;
+		Double ScoreTimeInSeconds { get; };
+		Int64 ScoreTimeInSamples{ get; };
+		Double ScoreOffsetSeconds;
+
+		Boolean PerformKsmps(ref Double[] spout);
+		Int64 OutputBufferSize{ get; };
+		Boolean PerformBuffer(ref Double[] buffer);
+		Boolean PerformAudioFrame(Windows.Media.AudioFrame frame);
+
+		void InputMessage(String msg);
+		CsoundStatus ScoreEvent(ScoreEventTypes type, Double[] p);
+		CsoundStatus ScoreEventAbsolute(ScoreEventTypes type, Double[] p, Double timeOffset);
+
+		CsoundTable GetTable(Int32 tableNumber);
+		Boolean UpdateTable(CsoundTable table);
+
+		void RewindScore();
+		CsoundStatus KillInstance(Double insno, String insName, InstanceKillModes mode, Boolean allowRelease);
+		void Stop();
+		CsoundStatus Cleanup();
+
+	}
+}
+
