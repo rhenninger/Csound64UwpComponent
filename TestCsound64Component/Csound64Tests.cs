@@ -40,7 +40,7 @@ namespace TestCsound64Component
             Assert.AreEqual(cs.Kr, (cs.Sr / cs.Ksmps));
             Assert.AreEqual(32768, cs.e0dBFS);
             Assert.AreEqual(1U, cs.Nchnls);
-            Assert.AreEqual(1U, cs.NchnlsInput);
+            Assert.AreEqual(1U, cs.Nchnls_i);
             Assert.IsFalse(cs.Debug);
             cs.Debug = true;
             Assert.IsTrue(cs.Debug);
@@ -77,13 +77,13 @@ namespace TestCsound64Component
             Assert.AreEqual(0.0, cs.ScoreTimeInSeconds);
             for (var i=0; i<48; ++i)
             {
-                Assert.IsFalse(cs.PerformKsmps(samps));
+                Assert.IsFalse(cs.PerformKsmps(samps, null));
                 Assert.IsTrue(cs.ScoreTimeInSeconds > 0.0);
             }
 
             var bsiz = cs.OutputBufferSize;
             double[] bsamps = new double[bsiz*cs.Nchnls];
-            while (!cs.PerformBuffer(bsamps))
+            while (!cs.PerformBuffer(bsamps, null))
             {
                 Assert.IsTrue(cs.ScoreTimeInSamples > 0);
             }
@@ -110,7 +110,7 @@ namespace TestCsound64Component
             Assert.AreEqual(480, bsiz);
             float[] bsamps = new float[bsiz];
             AudioFrame samps = new AudioFrame((uint)(bsiz * cs.Nchnls * sizeof(float)));
-            while (!cs.PerformAudioFrame(samps))
+            while (!cs.PerformAudioFrame(samps, null))
             {
                 var buffer = samps.LockBuffer(AudioBufferAccessMode.Read);
                 IMemoryBufferReference reference = buffer.CreateReference();
@@ -144,12 +144,19 @@ namespace TestCsound64Component
             Assert.IsTrue(r == 0);
             Assert.AreEqual(44100.0, cs.Sr); //defaults are in effect
             Assert.AreEqual(10U, cs.Ksmps);
+            Assert.IsFalse(cs.HasTable(1));
+            
+
+            //test creation in csound via read score and running performXX
             var score = "f1 0 1024 10 1 \ni1 0 .25 480 .25 1 \ne \n";
             r = cs.ReadScore(score);
+            Assert.IsFalse(cs.HasTable(1));
             var rs = cs.Start(0); //default sr/1000
-         //   Assert.AreEqual(441, cs.OutputBufferSize); //default works?
+            Assert.IsFalse(cs.HasTable(1));
+            //   Assert.AreEqual(441, cs.OutputBufferSize); //default works?
             double[] samps = new double[cs.Ksmps * cs.Nchnls];
-            Assert.IsFalse(cs.PerformKsmps(samps));
+            Assert.IsFalse(cs.PerformKsmps(samps, null));
+            Assert.IsTrue(cs.HasTable(1));
 
             var f1 = cs.GetTable(1);
             Assert.IsTrue(f1.Size > 0);
@@ -163,8 +170,11 @@ namespace TestCsound64Component
             Assert.AreEqual(2, parms.Length);
             Assert.AreEqual(1, parms[1]);
 
+            //test creation in csound via InputMessage
             cs.InputMessage("f4 0 -9 -2 0 2 10 100 0");
-            Assert.IsFalse(cs.PerformKsmps(samps));
+            Assert.IsFalse(cs.HasTable(4));
+            Assert.IsFalse(cs.PerformKsmps(samps, null));
+            Assert.IsTrue(cs.HasTable(4));
             var f4 = cs.GetTable(4);
             Assert.IsTrue(f4.Size >= 0);
             Assert.AreEqual(4, f4.Number);
@@ -176,10 +186,13 @@ namespace TestCsound64Component
             var f4prm = f4.Parameters;
             Assert.AreEqual(6, f4prm.Length);
 
+            //test creation via ScoreEvent
             double[] f3parms = new double[] { 3, 0, 128, 16, 1, 128, 1, 0};
             var result = cs.ScoreEvent(ScoreEventTypes.Function, f3parms);
-            Assert.IsTrue(r == 0);
-            Assert.IsFalse(cs.PerformKsmps(samps));
+            Assert.IsTrue(result == CsoundStatus.OK);
+            Assert.IsFalse(cs.HasTable(3));
+            Assert.IsFalse(cs.PerformKsmps(samps, null));
+            Assert.IsTrue(cs.HasTable(3));
             var f3 = cs.GetTable(3);
             Assert.IsTrue(f3.Size >= 0);
             Assert.AreEqual(3, f3.Number);
@@ -191,11 +204,82 @@ namespace TestCsound64Component
             var f3prm = f3.Parameters;
             Assert.AreEqual(5, f3prm.Length);
 
+            //test creation via eval code using ftgen
+            Assert.AreEqual(5, cs.EvalCode("giF5 ftgen 5, 0, 1024, 10, 1, .5, 0, .25\n return giF5\n"));
+            Assert.IsTrue(cs.HasTable(5));
+            var f5 = cs.GetTable(5);
+            Assert.IsNotNull(f5);
+            Assert.AreEqual(5, f5.Number);
+            Assert.AreEqual(1024, f5.Size);
+            Assert.AreEqual(10, f5.GenNbr);
+            Assert.IsTrue(f5.IsNormalized);
+
             var msg = new StringBuilder();
             MessageAttrs attrs;
             while (cs.HasMessages()) { msg.Append(cs.NextMessage(out attrs)); }
             var m = msg.ToString();
 
+        }
+        
+        [TestMethod]
+        public void TestCsoundChannels()
+        {
+            var cs = new Csound64();
+            var c1 = cs.GetChannel(ChannelType.ControlChannel, "ctl1", true, false);
+            Assert.IsNotNull(c1);
+            Assert.IsTrue(c1.IsInput);
+            Assert.IsFalse(c1.IsOutput);
+            Assert.AreEqual("ctl1", c1.Name);
+            Assert.AreEqual(0.0, (double)c1.Value);
+            c1.Value = .075;
+            Assert.AreEqual(.075, (double)c1.Value);
+            c1.Value = 1;
+            Assert.AreEqual(1.0, (double)c1.Value);
+            var cc1 = c1 as CsoundControlChannel;
+            Assert.IsNotNull(cc1);
+            var b = cc1.Behavior;
+
+            var orc = "gkc init 1000\ngkc chnexport \"cutoff\", 1, 3, i(gkc), 500, 2000 \n instr 1 \n asin oscil 0dbfs/4, p4 \n out asin \nendin\n";
+            var r = cs.CompileOrc(orc);
+            Assert.IsTrue(r == 0);
+            var score = "i1 0 1 440\n";
+            cs.ReadScore(score);
+            cs.Start(480);
+            var data = new double[cs.Ksmps * cs.Nchnls];
+            var cont = cs.PerformKsmps(data, null);
+            var c11 = cs.GetChannel(ChannelType.ControlChannel, "ctl1", true, false);
+            var c1v = c11.Value;
+            
+             var c2 = cs.GetChannel(ChannelType.StringChannel, "str2", true, true);
+            Assert.IsNotNull(c2);
+            Assert.IsTrue(c2.IsInput);
+            Assert.IsTrue(c2.IsOutput);
+            Assert.AreEqual("str2", c2.Name);
+            var s = c2.Value.ToString();
+            c2.Value = "Hi, Richard";
+            s = c2.Value.ToString();
+            Assert.AreEqual(s, c2.Value);
+
+            var co1 = cs.GetChannel(ChannelType.ControlChannel, "cutoff", true, false);
+            Assert.IsNotNull(co1);
+            Assert.AreEqual(co1.Type, ChannelType.ControlChannel);
+            Assert.AreEqual("cutoff", co1.Name);
+            Assert.IsTrue(co1.IsInput);
+            Assert.IsFalse(co1.IsOutput);
+            Assert.AreEqual(1000.0, co1.Value);
+            var co1r = co1 as CsoundControlChannel;
+            Assert.AreEqual(1000.0, co1r.SuggestedDefaultValue);
+            Assert.AreEqual(500.0, co1r.SuggestedMinimumValue);
+            Assert.AreEqual(2000.0, co1r.SuggestedMaximumValue);
+            
+
+            var ca1 = cs.GetChannel(ChannelType.AudioChannel, "aud1", true, true);
+            ca1.Value = data;
+            var data1 = ca1.Value;
+            var msg = new StringBuilder();
+            MessageAttrs attrs;
+            while (cs.HasMessages()) { msg.Append(cs.NextMessage(out attrs)); }
+            var m = msg.ToString();
         }
 
         [TestMethod]
@@ -428,7 +512,7 @@ namespace TestCsound64Component
                 {
                     uint capacity = numSamplesNeeded * (uint)m_csound.Nchnls * sizeof(float); //need to insure that nchnls and quantum channel assumptions match
                     AudioFrame audioData = new AudioFrame(capacity);
-                    var done = m_csound.PerformAudioFrame(audioData);
+                    var done = m_csound.PerformAudioFrame(audioData, null);
                     if (!done)
                     {
                         sender.AddFrame(audioData);

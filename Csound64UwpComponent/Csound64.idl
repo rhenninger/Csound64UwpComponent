@@ -58,9 +58,24 @@ namespace Csound64UwpComponent
 		ExactMatch  = 4,
 		InfiniteOnly = 8
 	};
+
+	enum ChannelType
+	{
+		ControlChannel = 1,
+		AudioChannel = 2,
+		StringChannel = 3,
+		PVSChannel = 4,
+		VarChannel = 5
+	};
+
+	enum ControlChannelBehavior
+	{
+		None = 0,
+		Integers = 1,
+		Linear = 2,
+		Exponential = 3
+	};
 	
-
-
 	runtimeclass CsoundParameters
 	{
 		CsoundParameters();
@@ -94,8 +109,42 @@ namespace Csound64UwpComponent
 		Double[] Contents;
 	}
 
-	/* Possible events: csound playing ended (1), error/warning messages received, */
-		
+	interface ICsoundChannel
+	{
+		String Name{ get; set; };
+		ChannelType Type{ get; };
+		Boolean IsInput{ get; };
+		Boolean IsOutput{ get; };
+		Object Value{ get; set; };
+	}
+
+	runtimeclass CsoundControlChannel : Csound64UwpComponent.ICsoundChannel
+	{
+		CsoundControlChannel();
+		Double ActualValue{ get; set; };
+		Csound64UwpComponent.ControlChannelBehavior Behavior{ get; };
+		Double SuggestedDefaultValue{ get; };
+		Double SuggestedMinimumValue{ get; };
+		Double SuggestedMaximumValue{ get; };
+		void UpdateSuggestedValues(Csound64UwpComponent.ControlChannelBehavior behavior, Double minimum, Double maximum, Double defaultValue);
+		Windows.Foundation.Point SuggestedControllerPosition{ get; set; };
+		Windows.Foundation.Size SuggestedControllerSize{ get; set; };
+		String ControllerAttributes{ get; set; };
+	}
+
+	runtimeclass CsoundAudioChannel : Csound64UwpComponent.ICsoundChannel
+	{
+		CsoundAudioChannel();
+		Double[] ActualValue{ get; set; };
+	}
+
+	runtimeclass CsoundStringChannel : Csound64UwpComponent.ICsoundChannel
+	{
+		CsoundStringChannel();
+		String ActualValue{ get; set; };
+	}
+
+
 	[default_interface]
 	runtimeclass Csound64 : Windows.Foundation.IClosable
 	{
@@ -106,7 +155,7 @@ namespace Csound64UwpComponent
 
 		UInt32 Ksmps { get; };
 		UInt32 Nchnls { get; };
-		UInt32 NchnlsInput { get; };
+		UInt32 Nchnls_i { get; };
 
 		Double Sr{ get; };
 		Double Kr{ get; };
@@ -134,17 +183,22 @@ namespace Csound64UwpComponent
 		Int64 ScoreTimeInSamples{ get; };
 		Double ScoreOffsetSeconds;
 
-		Boolean PerformKsmps(ref Double[] spout);
+		Boolean PerformKsmps(ref Double[] spout, Double[] spin);
 		Int64 OutputBufferSize{ get; };
-		Boolean PerformBuffer(ref Double[] buffer);
-		Boolean PerformAudioFrame(Windows.Media.AudioFrame frame);
+		Int64 InputBufferSize{ get; };
+		Boolean PerformBuffer(ref Double[] buffer, Double[] spin);
+		Boolean PerformAudioFrame(Windows.Media.AudioFrame outFrame, Windows.Media.AudioFrame inFrame);
 
 		void InputMessage(String msg);
 		CsoundStatus ScoreEvent(ScoreEventTypes type, Double[] p);
 		CsoundStatus ScoreEventAbsolute(ScoreEventTypes type, Double[] p, Double timeOffset);
 
+		Boolean HasTable(Int32 tableNumber);
 		CsoundTable GetTable(Int32 tableNumber);
 		Boolean UpdateTable(CsoundTable table);
+
+		Boolean HasChannels();
+		Csound64UwpComponent.ICsoundChannel GetChannel(Csound64UwpComponent.ChannelType type, String name, Boolean isInput, Boolean isOutput);
 
 		void RewindScore();
 		CsoundStatus KillInstance(Double insno, String insName, InstanceKillModes mode, Boolean allowRelease);

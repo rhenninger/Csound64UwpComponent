@@ -15,12 +15,18 @@
     <ClCompile Include="Csound64.cpp" />
     <ClCompile Include="CsoundParameters.cpp" />
     <ClCompile Include="CsoundTable.cpp" />
+    <ClCompile Include="CsoundControlChannel.cpp" />
+    <ClCompile Include="CsoundStringChannel.cpp" />
+    <ClCompile Include="CsoundAudioChannel.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h" />
     <ClInclude Include="Csound64.h" />
     <ClInclude Include="CsoundParameters.h" />
     <ClInclude Include="CsoundTable.h" />
+    <ClInclude Include="CsoundControlChannel.h" />
+    <ClInclude Include="CsoundStringChannel.h" />
+    <ClInclude Include="CsoundAudioChannel.h" />
   </ItemGroup>
   <ItemGroup>
     <Midl Include="Csound64.idl" />

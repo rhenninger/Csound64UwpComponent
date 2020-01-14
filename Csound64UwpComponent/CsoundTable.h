@@ -13,7 +13,7 @@ namespace winrt::Csound64UwpComponent::implementation
 		int32_t Size();
         int32_t GenNbr();
 		bool IsNormalized();
-		com_array<double> Parameters();
+		com_array<double> Parameters(); //As returned from csound, includes GenNbr [0], [1..n] are parameters
         com_array<double> Contents();
         void Contents(array_view<double const> value);
 

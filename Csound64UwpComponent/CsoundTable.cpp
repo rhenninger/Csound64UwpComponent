@@ -51,20 +51,24 @@ namespace winrt::Csound64UwpComponent::implementation
 		if (pCsound != nullptr)
 		{
 			m_tableSize = csoundTableLength(pCsound, tableNumber);
-			if (m_tableSize > 0)
+			if (m_tableSize >= 0) //must exist
 			{
+				if (m_tableSize > 0)
+				{
 
-				m_tableData.resize(m_tableSize);
-				csoundTableCopyOut(pCsound, tableNumber, m_tableData.data());
-			}
+					m_tableData.resize(m_tableSize);
+					csoundTableCopyOut(pCsound, tableNumber, m_tableData.data());
+				}
 
-			MYFLT* pArgs = nullptr;
-			int cnt = csoundGetTableArgs(pCsound, &pArgs, tableNumber);
-			if (cnt > 0)
-			{
-				m_tableArgs.resize(cnt);
-				std::copy_n(pArgs, cnt, m_tableArgs.begin());
+				MYFLT* pArgs = nullptr;
+				int cnt = csoundGetTableArgs(pCsound, &pArgs, tableNumber);
+				if (cnt > 0)
+				{
+					m_tableArgs.resize(cnt);
+					std::copy_n(pArgs, cnt, m_tableArgs.begin());
+				}
 			}
+			else new hresult_invalid_argument(L"There is no table in csound having the requested number");
 		}
 	}
 

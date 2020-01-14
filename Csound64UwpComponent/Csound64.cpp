@@ -1,9 +1,13 @@
 #include "pch.h"
+#include "csound.h"
 #include "Csound64.h"
 #include "Csound64.g.cpp"
 #include <cstdio>
 #include <functional>
 #include <algorithm>
+#include "CsoundControlChannel.h"
+#include "CsoundStringChannel.h"
+#include "CsoundAudioChannel.h"
 
 
 using namespace winrt::Windows::Foundation;
@@ -64,7 +68,7 @@ namespace winrt::Csound64UwpComponent::implementation
     {
 		return (m_csound) ? csoundGetNchnls(m_csound) : 0;
 	}
-    uint32_t Csound64::NchnlsInput() const noexcept
+    uint32_t Csound64::Nchnls_i() const noexcept
     {
 		return (m_csound) ? csoundGetNchnlsInput(m_csound) : 0;
 	}
@@ -103,6 +107,18 @@ namespace winrt::Csound64UwpComponent::implementation
 	{
 		if (m_csound) csoundSetMessageLevel(m_csound, static_cast<int>(value));
 	}
+
+	int64_t  Csound64::OutputBufferSize() const noexcept
+	{
+		return (m_csound) ? csoundGetOutputBufferSize(m_csound) : 0;
+	}
+
+	int64_t Csound64::InputBufferSize() const noexcept
+	{
+		return (m_csound) ? csoundGetInputBufferSize(m_csound) : 0;
+	}
+
+
 
 	bool Csound64::HasMessages() const noexcept
 	{
@@ -234,70 +250,134 @@ namespace winrt::Csound64UwpComponent::implementation
 		csoundInputMessage(m_csound, ms);
 	}
 
-	bool Csound64::PerformKsmps(array_view<double> hostbuf)
+	bool Csound64::PerformKsmps(array_view<double> hostbuf, array_view<double const> spin)
 	{
-		//insure hostbuf has right size for nchnls (nchnls*ksmps), input_nchnls
-		//scan for spin also if input_nchnls
+		if (!m_csound) throw new hresult_class_not_available(L"Csound instance not found while generating samples");
+
+		//if there are samples to transfer into csound's engine for processing, move them into csounds spin buffer prior to processing
+		if ((Nchnls_i() > 0) && spin.data() && (spin.size() == (Ksmps() * Nchnls_i())))
+		{
+			auto pSpin = csoundGetSpin(m_csound);
+			if (pSpin)
+			{
+				array_view<double> spinbuf{ pSpin, pSpin + ((size_t)Ksmps() * Nchnls_i()) };
+				std::copy(spin.cbegin(), spin.cend(), spinbuf.begin());
+			}
+		}
+
+		//Calculate the new samples and transfer them into the host's provided array
 		bool done = csoundPerformKsmps(m_csound);
-		auto const pSpout = csoundGetSpout(m_csound);
-		array_view<double const> spout{pSpout, pSpout+((size_t)Ksmps()*Nchnls())};
-		std::copy(spout.cbegin(), spout.cend(), hostbuf.begin());
-		//or fill with zero's
+		if (!done)
+		{
+			auto const pSpout = csoundGetSpout(m_csound);
+			array_view<double const> spout{ pSpout, pSpout + ((size_t)Ksmps() * Nchnls()) };
+			if (spout.size() == hostbuf.size())
+				std::copy(spout.cbegin(), spout.cend(), hostbuf.begin());
+			else
+				std::copy_n(spout.begin(), std::min(spout.size(), hostbuf.size()), hostbuf.begin());
+		}
+		else //or fill with zero's if done already...
+		{
+			std::fill(hostbuf.begin(), hostbuf.end(), 0.0);
+		}
 		return done;
 	}
 
-	int64_t  Csound64::OutputBufferSize()
-	{
-		return (m_csound) ? csoundGetOutputBufferSize(m_csound) : 0;
-	}
 
-	bool Csound64::PerformBuffer(array_view<double> buffer)
+	bool Csound64::PerformBuffer(array_view<double> buffer, array_view<double const> spin)
 	{
-		//insure hostbuf has right size for nchnls, input_nchnls; test m_csound
+		if (!m_csound) throw new hresult_class_not_available(L"Csound instance not found while generating samples");
+
+		//Fill csound's input buffer if there are incoming samples to forward to it prior to processing
+		if ((Nchnls_i() > 0) && spin.data() && (spin.size()))
+		{
+			auto insize = InputBufferSize();
+			if (insize && (insize == spin.size()))
+			{
+				auto pInbuf = csoundGetInputBuffer(m_csound);
+				array_view<double> spinbuf{ pInbuf, pInbuf+insize};
+				std::copy(spin.cbegin(), spin.cend(), spinbuf.begin());
+			}
+		}
+		
+		//If we are still active, set up transfer of samples from output buffer to host's array
 		auto const pBuffer = csoundGetOutputBuffer(m_csound);
 		auto done = (pBuffer == 0);
-		//scan for input buffer too
 		if (!done)
 		{
 			done = csoundPerformBuffer(m_csound) != 0;
 			auto bufsiz = csoundGetOutputBufferSize(m_csound);
 			array_view<double const> obuf{ pBuffer, pBuffer + bufsiz };
-			std::copy(obuf.cbegin(), obuf.cend(), buffer.begin());
-		} //else if no pBuffer?: fill with zeros
+			if (buffer.size() == obuf.size())
+				std::copy(obuf.cbegin(), obuf.cend(), buffer.begin());
+			else
+				std::copy_n(obuf.cbegin(), std::min(buffer.size(), obuf.size()), buffer.begin());
+		} 
+		else //if no pBuffer?: fill with zeros
+		{
+			std::fill(buffer.begin(), buffer.end(), 0.0);
+		}
 		return done;
 	}
 
-	bool Csound64::PerformAudioFrame(Windows::Media::AudioFrame const& frame)
+	bool Csound64::PerformAudioFrame(Windows::Media::AudioFrame const& frame, Windows::Media::AudioFrame const& inFrame)
 	{
 		if (!m_csound) throw new hresult_class_not_available(L"Csound instance not found while generating samples");
-		//test capacity and csbufsiz are equal, m_csound exists, 
-		//Turn csounds output buffer into an array_view<double>
+		uint8_t* pBytes{};	//will receive a pointer to first byte in an AudioFrame's buffer
+		uint32_t capacity{};//will receive byte count of an AudioFrame's buffer
+		HRESULT ok = S_OK; //will receive error code from buffer access attempts
+		float* pSamples{};//will hold pBytes recast as a pointer to floats: the size of samples in an AudioFrame
+		uint64_t size{}; //will hold size of a buffer in floats
+
+		//If there are samples in the input frame, transfer these into csounds input buffer for processing
+		auto csInbufSize = InputBufferSize();
+		auto pCsInBuffer = csoundGetInputBuffer(m_csound);
+		if ((Nchnls_i() > 0) && (inFrame) && (pCsInBuffer) && (csInbufSize > 0))
+		{
+			//unpack inFrameand copy into csound's InputBuffer
+			auto inbuf = inFrame.LockBuffer(AudioBufferAccessMode::Read);
+			auto pInRaw = inbuf.CreateReference();
+			auto pInBufByteAccess = pInRaw.as<IMemoryBufferByteAccess>();//be sure we got a valid address
+			ok = pInBufByteAccess->GetBuffer(&pBytes, &capacity);
+			if (ok == S_OK)
+			{
+				pSamples = (float*)pBytes;					//be sure we got a valid address in float boundaries
+				size = capacity / sizeof(float);			//translate byte count to float count and make a float array from it
+				array_view<const float> sampsin{ pSamples, pSamples + size };//frame AudioFrame's buffer in an array_view
+
+				array_view<double> ibuf{ pCsInBuffer, pCsInBuffer + csInbufSize }; //build an array_view over csound's inputbuffer
+
+				std::transform(sampsin.cbegin(), sampsin.cend(), ibuf.begin(), [](float sampin) ->double {return sampin; });
+			}
+		}
+
+		//Make output frame's buffer look like a memory block so csound will move its output samples into it.
+		//test capacity and csbufsiz are equal, turn csounds output buffer into an array_view<double>
 		auto const pCsBuffer = csoundGetOutputBuffer(m_csound); 
 		auto done = (pCsBuffer == 0);
 
 		//only proceed if buffer created
 		done = csoundPerformBuffer(m_csound) != 0;
-		auto csbufsiz = csoundGetOutputBufferSize(m_csound); //find csound buffer size and make a double array from it
+		auto csbufsiz = OutputBufferSize(); //find csound buffer size and make a double array from it
 		array_view<double const> obuf{ pCsBuffer, pCsBuffer + csbufsiz }; //build an array_view around it for easy access
 
 		//Turn AudioFrame's buffer into an array_view<float> 
 		auto audioBuf = frame.LockBuffer(AudioBufferAccessMode::ReadWrite);
 		auto pRaw = audioBuf.CreateReference();
 		auto pBufferByteAccess = pRaw.as<IMemoryBufferByteAccess>();//be sure we got a valid address
-		uint8_t* pBytes{};	//will receive a pointer to first byte in frame's buffer
-		uint32_t capacity{};//will receive byte count of frame's buffer
-		HRESULT ok = pBufferByteAccess->GetBuffer(&pBytes, &capacity);
 
-		//should we proceed if ok not OK?
-		float* pSamples = (float*)pBytes;					//be sure we got a valid address
-		auto size = capacity / sizeof(float);				//translate byte count to float count and make a float array from it
+		ok = pBufferByteAccess->GetBuffer(&pBytes, &capacity);
+		//Highly unlikely, but cannot proceed if ok not S_OK, something is very wrong if this occurs, so give up
+		if (ok != S_OK) throw new hresult_error(ok, L"Unable to access audio buffer during PerformAudioFrame");
+
+		pSamples = (float*)pBytes;					//be sure we got a valid address
+		size = capacity / sizeof(float);			//translate byte count to float count and make a float array from it
 
 		if (static_cast<long>(size) != csbufsiz) throw new hresult_invalid_argument(L"output buffer size of csound and size expected do not match");
 
-		//only proceed if done stays false, else fill buffer with 0's
 		array_view<float> samples{ pSamples, pSamples+size };
 
-		//copy csound's doubles into audio frame's floats
+		//copy csound's doubles into audio frame's floats, but only transfer while done stays false, else fill buffer with 0's
 		std::transform(obuf.begin(), obuf.end(), samples.begin(), [](double sample) ->float {return static_cast<float>(sample); });
 
 		if (e0dBFS() > 1.0) // Enforce AudioFrame's limit of max float values of 1.0
@@ -306,6 +386,12 @@ namespace winrt::Csound64UwpComponent::implementation
 			std::transform(samples.cbegin(), samples.cend(), samples.begin(), [f0dBfs](float sample) {return sample / f0dBfs; });
 		}
 		return done; //frame now has csound's samples as floats in an AudioFrame
+	}
+
+	bool Csound64::HasTable(int32_t tableNumber) const noexcept
+	{
+		double* tblPtr = nullptr;//dummy to receive pointer to table data in csound which we don't need for this method
+		return (m_csound != nullptr) ? (csoundGetTable(m_csound, &tblPtr, tableNumber) >= 0) : false;
 	}
 
 	Csound64UwpComponent::CsoundTable Csound64::GetTable(int32_t tableNumber)
@@ -329,6 +415,42 @@ namespace winrt::Csound64UwpComponent::implementation
 		return ok;
 	}
 
+	bool Csound64::HasChannels()
+	{
+		throw hresult_not_implemented();
+	}
+	Csound64UwpComponent::ICsoundChannel Csound64::GetChannel(Csound64UwpComponent::ChannelType const& type, hstring const& name, bool isInput, bool isOutput)
+	{
+		Csound64UwpComponent::ICsoundChannel channel{ nullptr };
+		switch (type)
+		{
+		case Csound64UwpComponent::ChannelType::ControlChannel:
+		{
+			channel = winrt::make<Csound64UwpComponent::implementation::CsoundControlChannel>();
+			auto pChannel = winrt::get_self<CsoundControlChannel>(channel);
+			pChannel->DeclareChannelParameters(m_csound, name, isInput, isOutput);
+		}
+			break;
+		case Csound64UwpComponent::ChannelType::StringChannel:
+		{
+			channel = winrt::make<Csound64UwpComponent::implementation::CsoundStringChannel>();
+			auto pChannel = winrt::get_self<CsoundStringChannel>(channel);
+			pChannel->DeclareChannelParameters(m_csound, name, isInput, isOutput);
+		}
+			break;
+		case Csound64UwpComponent::ChannelType::AudioChannel:
+		{
+			channel = winrt::make<Csound64UwpComponent::implementation::CsoundAudioChannel>();
+			auto pChannel = winrt::get_self<CsoundAudioChannel>(channel);
+			pChannel->DeclareChannelParameters(m_csound, name, isInput, isOutput);
+		}
+		break;
+		case Csound64UwpComponent::ChannelType::PVSChannel:
+		default:
+			break;
+		}
+		return channel;
+	}
 
 	Csound64UwpComponent::CsoundStatus Csound64::ScoreEvent(Csound64UwpComponent::ScoreEventTypes const& type, array_view<double const> p)
 	{

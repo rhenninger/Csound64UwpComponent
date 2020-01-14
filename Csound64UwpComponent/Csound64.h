@@ -1,6 +1,6 @@
 #pragma once
 #include "Csound64.g.h"
-#include "csound.h"
+
 #include "CsoundParameters.h"
 #include "CsoundTable.h"
 
@@ -43,7 +43,7 @@ namespace winrt::Csound64UwpComponent::implementation
 
         uint32_t Ksmps() const noexcept;
 		uint32_t Nchnls() const noexcept;
-		uint32_t NchnlsInput() const noexcept;
+		uint32_t Nchnls_i() const noexcept;
         double Sr() const noexcept;
         double Kr() const noexcept;
         double e0dBFS() const noexcept;
@@ -70,13 +70,18 @@ namespace winrt::Csound64UwpComponent::implementation
 		double ScoreOffsetSeconds() const noexcept;
 		void ScoreOffsetSeconds(double value) noexcept;
 
-		bool PerformKsmps(array_view<double> spout);
-		int64_t  OutputBufferSize();
-		bool PerformBuffer(array_view<double> buffer);
-		bool PerformAudioFrame(Windows::Media::AudioFrame const& frame);
+		bool PerformKsmps(array_view<double> spout, array_view<double const> spin);
+		int64_t  OutputBufferSize() const noexcept;
+		int64_t InputBufferSize() const noexcept;
+		bool PerformBuffer(array_view<double> buffer, array_view<double const> spin);
+		bool PerformAudioFrame(Windows::Media::AudioFrame const& frame, Windows::Media::AudioFrame const& inFrame);
 
+		bool HasTable(int32_t tableNumber) const noexcept;
 		Csound64UwpComponent::CsoundTable GetTable(int32_t tableNumber);
 		bool UpdateTable(Csound64UwpComponent::CsoundTable const& table);
+
+		bool HasChannels();
+		Csound64UwpComponent::ICsoundChannel GetChannel(Csound64UwpComponent::ChannelType const& type, hstring const& name, bool isInput, bool isOutput);
 
 		void InputMessage(hstring const& msg);
 		Csound64UwpComponent::CsoundStatus ScoreEvent(Csound64UwpComponent::ScoreEventTypes const& type, array_view<double const> p);

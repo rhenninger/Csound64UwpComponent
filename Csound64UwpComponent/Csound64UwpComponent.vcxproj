@@ -97,7 +97,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
     <ClCompile>
-      <PreprocessorDefinitions>_DEBUG;USE_DOUBLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;USE_DOUBLE;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">stdcpplatest</LanguageStandard>
     </ClCompile>
     <Link>
@@ -111,13 +111,19 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="Csound64.h" />
+    <ClInclude Include="CsoundAudioChannel.h" />
+    <ClInclude Include="CsoundControlChannel.h" />
     <ClInclude Include="CsoundParameters.h" />
+    <ClInclude Include="CsoundStringChannel.h" />
     <ClInclude Include="CsoundTable.h" />
     <ClInclude Include="pch.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Csound64.cpp" />
+    <ClCompile Include="CsoundAudioChannel.cpp" />
+    <ClCompile Include="CsoundControlChannel.cpp" />
     <ClCompile Include="CsoundParameters.cpp" />
+    <ClCompile Include="CsoundStringChannel.cpp" />
     <ClCompile Include="CsoundTable.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
