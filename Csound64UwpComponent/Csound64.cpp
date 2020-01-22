@@ -3,15 +3,20 @@
 #include "Csound64.h"
 #include "Csound64.g.cpp"
 #include <cstdio>
+#include <cstring>
 #include <functional>
 #include <algorithm>
+#include <unordered_map>
 #include "CsoundControlChannel.h"
 #include "CsoundStringChannel.h"
 #include "CsoundAudioChannel.h"
 
 
 using namespace winrt::Windows::Foundation;
+using namespace winrt::Windows::Foundation::Collections;
 using namespace winrt::Windows::Media;
+using namespace winrt::Windows::Devices::Midi;
+using namespace winrt::Windows::Storage::Streams;
 using namespace std::placeholders;
 
 //Encapsulated interface to get a pointer to the raw memory of an AudioFrame's AudioBuffer
@@ -20,6 +25,81 @@ struct __declspec(uuid("5b0d3235-4dba-4d44-865e-8f1d0e4fd04d")) __declspec(novta
 {
 	virtual HRESULT __stdcall GetBuffer(uint8_t** value, uint32_t* capacity) = 0;
 };
+
+//Csound midi callbacks for processing midi data in and out
+extern "C" int MidiInOpen(CSOUND * csound, void** userdata, const char* devName)
+{
+	auto ptr = csoundGetHostData(csound);
+	auto pCsound64 = reinterpret_cast<winrt::Csound64UwpComponent::implementation::Csound64*>(ptr);
+	if (!pCsound64) return -1;
+	if (!(userdata && devName)) return -2;
+	auto name = new std::string(devName);
+	if (userdata) *userdata = name;
+	pCsound64->OpenMidiDataStream(winrt::to_hstring(devName), 1024);
+	return 0;
+}
+
+extern "C" int MidiRead(CSOUND* csound, void* userdata, unsigned char* buf, int nBytes)
+{
+	auto ptr = csoundGetHostData(csound);
+	auto pCsound64 = reinterpret_cast<winrt::Csound64UwpComponent::implementation::Csound64*>(ptr);
+	if (!(pCsound64 && userdata)) return -1;
+	auto b = winrt::array_view<uint8_t>(buf, buf+nBytes);
+	auto devName = reinterpret_cast<std::string*>(userdata);
+	int cnt = pCsound64->ReceiveMidiData(winrt::to_hstring(devName->data()), b);
+	return cnt;
+}
+
+extern "C" int MidiInClose(CSOUND* csound, void* userdata)
+{
+	if (userdata)
+	{
+		auto ptr = csoundGetHostData(csound);
+		auto pCsound64 = reinterpret_cast<winrt::Csound64UwpComponent::implementation::Csound64*>(ptr);
+		if (!(pCsound64 && userdata)) return -1;
+		auto devName = static_cast<std::string*>(userdata);
+		pCsound64->CloseMidiDataStream(winrt::to_hstring(devName->data()));
+		delete devName;
+	}
+	return 0;
+}
+
+extern "C" int MidiOutOpen(CSOUND * csound, void** userdata, const char* devName)
+{
+	auto ptr = csoundGetHostData(csound);
+	auto pCsound64 = reinterpret_cast<winrt::Csound64UwpComponent::implementation::Csound64*>(ptr);
+	if (!pCsound64) return -1;
+	if (!(userdata && devName)) return -2;
+	auto name = new std::string(devName);
+	if (userdata) *userdata = name;
+	pCsound64->OpenMidiDataStream(winrt::to_hstring(devName), 0); //maybe not needed for writing
+	return 0;
+}
+
+extern "C" int MidiWrite(CSOUND * csound, void* userdata, const unsigned char* buf, int nBytes)
+{
+	auto ptr = csoundGetHostData(csound);
+	auto pCsound64 = reinterpret_cast<winrt::Csound64UwpComponent::implementation::Csound64*>(ptr);
+	if (!(pCsound64 && userdata)) return -1;
+	auto b = winrt::array_view<uint8_t const>(buf, buf + nBytes);
+	auto devName = reinterpret_cast<std::string*>(userdata);
+	pCsound64->RaiseMidiDataAvailable(winrt::to_hstring(devName->data()), b);
+	return nBytes;
+}
+
+extern "C" int MidiOutClose(CSOUND * csound, void* userdata)
+{
+	if (userdata)
+	{
+		auto ptr = csoundGetHostData(csound);
+		auto pCsound64 = reinterpret_cast<winrt::Csound64UwpComponent::implementation::Csound64*>(ptr);
+		if (!(pCsound64 && userdata)) return -1;
+		auto devName = static_cast<std::string*>(userdata);
+		pCsound64->CloseMidiDataStream(winrt::to_hstring(devName->data())); //maybe not needed for writing
+		delete devName;
+	}
+	return 0;
+}
 
 namespace winrt::Csound64UwpComponent::implementation
 {
@@ -39,17 +119,35 @@ namespace winrt::Csound64UwpComponent::implementation
 	{
 		if (m_csound)
 		{
-			csoundSetHostData(m_csound, nullptr); //get rid of reference to this so refcount lowers
-			csoundDestroyMessageBuffer(m_csound); //get rid of message buffer structure
+			DetachFromCsound();
 			csoundDestroy(m_csound); //let csound release resources
 			m_csound = nullptr; //zap our reference so Close() is idempotent
 		}
+	}
+
+	void Csound64::DetachFromCsound() //closes items we use attached to csound
+	{
+		for (auto stmt : m_midiStreams) CloseMidiDataStream(winrt::to_hstring(stmt.first));
+		csoundSetHostData(m_csound, nullptr); //get rid of reference to this so refcount lowers
+		csoundDestroyMessageBuffer(m_csound); //get rid of message buffer structure
+	}
+
+
+
+	winrt::event_token Csound64::MidiDataAvailable(Windows::Foundation::TypedEventHandler<Csound64UwpComponent::Csound64, Csound64UwpComponent::MidiDataAvailableEventArgs> const& handler)
+	{
+		return m_midiDataAvailable.add(handler);
+	}
+	void Csound64::MidiDataAvailable(winrt::event_token const& token) noexcept
+	{
+		m_midiDataAvailable.remove(token);
 	}
 
     int32_t Csound64::Version() const noexcept
     {
 		return csoundGetVersion();
     }
+
     int32_t Csound64::ApiVersion() const noexcept
     {
 		return csoundGetAPIVersion();
@@ -161,14 +259,16 @@ namespace winrt::Csound64UwpComponent::implementation
 		p->UpdateCsoundParams(m_csound);
 	}
 
-	    void Csound64::Reset()
+	void Csound64::Reset()
     {
 		if (m_csound)
 		{
+			DetachFromCsound(); //call common routines for releasing memory we shared with csound
 			csoundReset(m_csound);
 			csoundSetHostData(m_csound, this); //HostData can be zapped by csoundDestroyMessageBuffer (holdover from old implementation of message buffers)
-			csoundCreateMessageBuffer(m_csound, 0);
-			csoundSetHostImplementedMIDIIO(m_csound, 1); //zap midi
+			csoundCreateMessageBuffer(m_csound, 0); //rebuild message buffer
+			AttachMidiCallbacks(); //re-attach midi callbacks in case they got zapped in csoundReset()
+			//save Audio declaration to Start() when outputbuffer size is known
 		}
     }
 
@@ -210,7 +310,7 @@ namespace winrt::Csound64UwpComponent::implementation
 		{
 			//Call with number for frames, or 0 for default in -b
 			csoundSetHostImplementedAudioIO(m_csound, 1, (frameCount > 0) ? frameCount : static_cast<int>(Sr() / 100)); 
-			csoundSetHostImplementedMIDIIO(m_csound, 1); //zap midi
+			AttachMidiCallbacks(); //make sure midi is attached
 			ok = static_cast<CsoundStatus>(csoundStart(m_csound));
 		}
 		return ok;
@@ -417,8 +517,32 @@ namespace winrt::Csound64UwpComponent::implementation
 
 	bool Csound64::HasChannels()
 	{
-		throw hresult_not_implemented();
+		controlChannelInfo_t* channelInfos{ nullptr };
+		int chnlcnt = csoundListChannels(m_csound, &channelInfos);
+		if (chnlcnt > 0) csoundDeleteChannelList(m_csound, channelInfos);
+		return chnlcnt > 0;
 	}
+
+	Windows::Foundation::Collections::IMapView<hstring, Csound64UwpComponent::ChannelType> Csound64::ListChannels()
+	{
+		std::unordered_map<winrt::hstring, winrt::Csound64UwpComponent::ChannelType> infos{};
+		controlChannelInfo_t* channelInfos{ nullptr };
+		int chnlcnt = csoundListChannels(m_csound, &channelInfos);
+		if ((chnlcnt > 0) && channelInfos)
+		{
+			for (int i = 0; i < chnlcnt; ++i)
+			{
+				auto info = channelInfos[i];
+				auto name = winrt::to_hstring(info.name);
+				auto ct = static_cast<ChannelType>(info.type & 7);
+				infos.emplace(name, ct);
+			}
+			csoundDeleteChannelList(m_csound, channelInfos);
+		}
+		Windows::Foundation::Collections::IMap<hstring, ChannelType> view{ winrt::single_threaded_map(std::move(infos)) };
+		return view.GetView();
+	}
+
 	Csound64UwpComponent::ICsoundChannel Csound64::GetChannel(Csound64UwpComponent::ChannelType const& type, hstring const& name, bool isInput, bool isOutput)
 	{
 		Csound64UwpComponent::ICsoundChannel channel{ nullptr };
@@ -430,14 +554,14 @@ namespace winrt::Csound64UwpComponent::implementation
 			auto pChannel = winrt::get_self<CsoundControlChannel>(channel);
 			pChannel->DeclareChannelParameters(m_csound, name, isInput, isOutput);
 		}
-			break;
+		break;
 		case Csound64UwpComponent::ChannelType::StringChannel:
 		{
 			channel = winrt::make<Csound64UwpComponent::implementation::CsoundStringChannel>();
 			auto pChannel = winrt::get_self<CsoundStringChannel>(channel);
 			pChannel->DeclareChannelParameters(m_csound, name, isInput, isOutput);
 		}
-			break;
+		break;
 		case Csound64UwpComponent::ChannelType::AudioChannel:
 		{
 			channel = winrt::make<Csound64UwpComponent::implementation::CsoundAudioChannel>();
@@ -476,7 +600,7 @@ namespace winrt::Csound64UwpComponent::implementation
 	}
 
 	void Csound64::Stop() noexcept
-    {
+	{
 		if (m_csound) csoundStop(m_csound);
 	}
 
@@ -484,6 +608,83 @@ namespace winrt::Csound64UwpComponent::implementation
 	{
 		return (m_csound) ? static_cast<CsoundStatus>(csoundCleanup(m_csound)) : CsoundStatus::UnspecifiedError;
 	}
+
+	int32_t Csound64::OpenMidiDataStream(hstring const& devicename, int32_t bufferSize)
+	{
+		auto name = winrt::to_string(devicename);
+		if (m_midiStreams.contains(name) && (m_midiStreams[name].second != nullptr))
+		{
+			auto circbuf = m_midiStreams[name];
+			std::lock_guard<std::mutex> guard(*circbuf.first);
+			if (bufferSize == 0)
+			{
+				csoundFlushCircularBuffer(m_csound, circbuf.second);//keep current size
+			} else
+			{ 
+				csoundDestroyCircularBuffer(m_csound, circbuf.second);
+				m_midiStreams[name].second = nullptr;
+			}
+		} 
+		if (!m_midiStreams.contains(name) || (m_midiStreams[name].second == nullptr))
+		{
+			auto size = (bufferSize > 0) ? bufferSize : 1024;
+			auto buf = csoundCreateCircularBuffer(m_csound, size, sizeof(uint8_t));	
+			if (!buf) return -3;
+			m_midiStreams.emplace(winrt::to_string(devicename), std::pair<std::mutex*, void*>( new std::mutex, buf));
+		}
+		return 0;
+	}
+
+	void Csound64::AttachMidiCallbacks()
+	{
+		csoundSetHostImplementedMIDIIO(m_csound, 1); //zap internal midi devices
+		csoundSetExternalMidiInOpenCallback(m_csound, MidiInOpen);
+		csoundSetExternalMidiReadCallback(m_csound, MidiRead);
+		csoundSetExternalMidiInCloseCallback(m_csound, MidiInClose);
+		csoundSetExternalMidiOutOpenCallback(m_csound, MidiOutOpen);
+		csoundSetExternalMidiWriteCallback(m_csound, MidiWrite);
+		csoundSetExternalMidiOutCloseCallback(m_csound, MidiOutClose);
+	}
+
+
+	int32_t Csound64::AppendMidiData(hstring const& deviceName, array_view<uint8_t const> data)
+	{
+		auto name = winrt::to_string(deviceName);
+		if (!m_midiStreams.contains(name) || (m_midiStreams[name].second == nullptr)) return -1;
+		auto circbuf = m_midiStreams[name];
+		std::lock_guard<std::mutex> guard(*circbuf.first);
+		return csoundWriteCircularBuffer(m_csound, circbuf.second, data.data(), data.size());
+	}
+
+	int32_t Csound64::ReceiveMidiData(hstring const& deviceName, array_view<uint8_t> data)
+	{
+		auto name = winrt::to_string(deviceName);
+		if (!m_midiStreams.contains(name) || (m_midiStreams[name].second == nullptr)) return -1;
+		auto circbuf = m_midiStreams[name];
+		std::lock_guard<std::mutex> guard(*circbuf.first);
+		auto cnt = csoundReadCircularBuffer(m_csound, circbuf.second, data.data(), data.size());
+		return cnt;
+	}
+	void Csound64::RaiseMidiDataAvailable(hstring const& deviceName, array_view<uint8_t const> data)
+	{
+		auto args = MidiDataAvailableEventArgs();
+		args.LoadMidiData(deviceName, data);//populate a MidiDataAvailableEventArgs object
+		m_midiDataAvailable(*this, args);//and throw the MidiDataAvailable event to anyone who cares
+	}
+
+	int32_t Csound64::CloseMidiDataStream(hstring const& deviceName)
+	{
+		auto name = winrt::to_string(deviceName);
+		if (m_midiStreams.contains(name) && (m_midiStreams[name].second != nullptr))
+		{
+			auto circbuf = m_midiStreams[name];
+			std::lock_guard<std::mutex> guard(*circbuf.first);
+			csoundDestroyCircularBuffer(m_csound, circbuf.second);//csound releases circbuf.second, pointer only shared here
+			m_midiStreams.erase(name);
+		}
+		return 0;
+	}
+
 }
 // How to recover Csound64 object from csound* via csound callbacks:
 //		auto ptr = csoundGetHostData(csound);

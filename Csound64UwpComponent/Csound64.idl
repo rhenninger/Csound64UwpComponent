@@ -75,7 +75,7 @@ namespace Csound64UwpComponent
 		Linear = 2,
 		Exponential = 3
 	};
-	
+
 	runtimeclass CsoundParameters
 	{
 		CsoundParameters();
@@ -144,6 +144,11 @@ namespace Csound64UwpComponent
 		String ActualValue{ get; set; };
 	}
 
+	runtimeclass MidiDataAvailableEventArgs
+	{
+		String DeviceName {get; };
+		UInt8[] MidiData{ get; };
+	}
 
 	[default_interface]
 	runtimeclass Csound64 : Windows.Foundation.IClosable
@@ -198,12 +203,21 @@ namespace Csound64UwpComponent
 		Boolean UpdateTable(CsoundTable table);
 
 		Boolean HasChannels();
+		Windows.Foundation.Collections.IMapView<String, Csound64UwpComponent.ChannelType> ListChannels();
 		Csound64UwpComponent.ICsoundChannel GetChannel(Csound64UwpComponent.ChannelType type, String name, Boolean isInput, Boolean isOutput);
 
 		void RewindScore();
 		CsoundStatus KillInstance(Double insno, String insName, InstanceKillModes mode, Boolean allowRelease);
 		void Stop();
 		CsoundStatus Cleanup();
+
+		Int32 OpenMidiDataStream(String devicename, Int32 bufferSize);
+		Int32 AppendMidiData(String deviceName, UInt8[] data);
+		Int32 ReceiveMidiData(String deviceName, ref UInt8[] data);
+		Int32 CloseMidiDataStream(String deviceName);
+		void RaiseMidiDataAvailable(String deviceName, UInt8[] data);
+
+		event Windows.Foundation.TypedEventHandler<Csound64, MidiDataAvailableEventArgs> MidiDataAvailable;
 
 	}
 }

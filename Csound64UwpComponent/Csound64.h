@@ -1,11 +1,22 @@
 #pragma once
 #include "Csound64.g.h"
 
+#include "csound.h"
 #include "CsoundParameters.h"
 #include "CsoundTable.h"
+#include "MidiDataAvailableEventArgs.h"
+#include <mutex>
+#include <memory>
+#include <unordered_map>
+#include <utility>
 
 /*
 	This file provides a Windows 10 UWP component to access Csound via its Csound API.
+	It is designed to facilitate use in Windows 10 Apps whiching wish to use the new
+	Windows 10  Audio and Midi API's.  It is hard coded to use 64-bit CSOUND: csound64.dll.
+	The method signatures and COM bridge code for this component were generated
+	from Microsoft MIDL 3.0 file 'csound64.idl via C++/WinRT tools.
+
 	This UWP component is copyright (C) 2019 by Richard Henninger under the same license 
 	and terms as Csound itself as stated below.
 	
@@ -81,7 +92,17 @@ namespace winrt::Csound64UwpComponent::implementation
 		bool UpdateTable(Csound64UwpComponent::CsoundTable const& table);
 
 		bool HasChannels();
+		Windows::Foundation::Collections::IMapView<hstring, Csound64UwpComponent::ChannelType> ListChannels();
 		Csound64UwpComponent::ICsoundChannel GetChannel(Csound64UwpComponent::ChannelType const& type, hstring const& name, bool isInput, bool isOutput);
+
+		int32_t OpenMidiDataStream(hstring const& devicename, int32_t bufferSize);
+		int32_t AppendMidiData(hstring const& deviceName, array_view<uint8_t const> data);
+		int32_t ReceiveMidiData(hstring const& deviceName, array_view<uint8_t> data);
+		int32_t CloseMidiDataStream(hstring const& deviceName);
+		void RaiseMidiDataAvailable(hstring const& deviceName, array_view<uint8_t const> data);
+
+		winrt::event_token MidiDataAvailable(Windows::Foundation::TypedEventHandler<Csound64UwpComponent::Csound64, Csound64UwpComponent::MidiDataAvailableEventArgs> const& handler);
+		void MidiDataAvailable(winrt::event_token const& token) noexcept;
 
 		void InputMessage(hstring const& msg);
 		Csound64UwpComponent::CsoundStatus ScoreEvent(Csound64UwpComponent::ScoreEventTypes const& type, array_view<double const> p);
@@ -96,9 +117,13 @@ namespace winrt::Csound64UwpComponent::implementation
 		bool SetSingleParameter(hstring const& argStr);
 		void SetCsoundParameters(Csound64UwpComponent::CsoundParameters const& params);
 
-
+		/* Internal routines not visible via metadata*/
+		void DetachFromCsound(); //closes items we use attached to csound
+		void AttachMidiCallbacks();
 	private:
 		CSOUND* m_csound{};
+		winrt::event<Windows::Foundation::TypedEventHandler<Csound64UwpComponent::Csound64, Csound64UwpComponent::MidiDataAvailableEventArgs>> m_midiDataAvailable;
+		std::unordered_map<std::string, std::pair<std::mutex*, void*>> m_midiStreams{};
     };
 }
 namespace winrt::Csound64UwpComponent::factory_implementation

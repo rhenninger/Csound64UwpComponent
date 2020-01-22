@@ -69,6 +69,7 @@ namespace winrt::Csound64UwpComponent::implementation
         m_channelInfo.hints.max = maximum;
         m_channelInfo.hints.dflt = defaultValue;
         auto result = csoundSetControlChannelHints(mp_csound, m_channelInfo.name, m_channelInfo.hints);
+        if (result != 0) throw hresult_class_not_available(L"Csound control channel hints could not be updated");
     }
 
     Windows::Foundation::Point CsoundControlChannel::SuggestedControllerPosition()
@@ -81,6 +82,7 @@ namespace winrt::Csound64UwpComponent::implementation
         m_channelInfo.hints.x = static_cast<int>(value.X);
         m_channelInfo.hints.y = static_cast<int>(value.Y);
         auto result = csoundSetControlChannelHints(mp_csound, m_channelInfo.name, m_channelInfo.hints);
+        if (result != 0) throw hresult_class_not_available(L"Csound control channel hints could not be updated");
     }
 
     Windows::Foundation::Size CsoundControlChannel::SuggestedControllerSize()
@@ -93,6 +95,7 @@ namespace winrt::Csound64UwpComponent::implementation
         m_channelInfo.hints.height = static_cast<int>(value.Height);
         m_channelInfo.hints.width = static_cast<int>(value.Width);
         auto result = csoundSetControlChannelHints(mp_csound, m_channelInfo.name, m_channelInfo.hints);
+        if (result != 0) throw hresult_class_not_available(L"Csound control channel hints could not be updated");
     }
 
     hstring CsoundControlChannel::ControllerAttributes()
@@ -136,11 +139,13 @@ namespace winrt::Csound64UwpComponent::implementation
         if (isInput) m_channelInfo.type |= CSOUND_INPUT_CHANNEL;
         if (isOutput) m_channelInfo.type |= CSOUND_OUTPUT_CHANNEL;
         Name(name);
-        auto ok = csoundGetChannelPtr(pCsound, &value, m_name.c_str(), m_channelInfo.type);
+        auto result = csoundGetChannelPtr(pCsound, &value, m_name.c_str(), m_channelInfo.type);
+        if (result != 0) throw hresult_class_not_available(L"Csound control channel could not be updated");
         auto hok = csoundGetControlChannelHints(pCsound, m_name.c_str(), &m_channelInfo.hints);
-        if (m_channelInfo.hints.attributes)
+        
+        if ((hok == 0) && m_channelInfo.hints.attributes)
         {
-            m_attributes = m_channelInfo.hints.attributes; //clean up csound allocated data.
+            m_attributes = m_channelInfo.hints.attributes; //Create a local copy of attribute string, then clean up csound allocated string 
             free(m_channelInfo.hints.attributes);
             m_channelInfo.hints.attributes = m_attributes.data();
         }

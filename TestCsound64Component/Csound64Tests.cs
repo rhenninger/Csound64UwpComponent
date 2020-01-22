@@ -2,6 +2,7 @@
 using System;
 using System.Text;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.WindowsRuntime;
 using Windows.Media;
 using System.Threading.Tasks;
 //using System.Diagnostics;
@@ -9,11 +10,14 @@ using Windows.Foundation;
 using Windows.Storage;
 using Windows.Media.Audio;
 using Windows.Media.MediaProperties;
+using Windows.Devices;
+using Windows.Devices.Midi;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Csound64UwpComponent;
 using Windows.UI.Core;
 using Windows.ApplicationModel.Core;
 using Windows.Media.Render;
+using Windows.Devices.Enumeration;
 
 [ComImport]
 [Guid("5B0D3235-4DBA-4D44-865E-8F1D0E4FD04D")]
@@ -225,7 +229,9 @@ namespace TestCsound64Component
         public void TestCsoundChannels()
         {
             var cs = new Csound64();
+            Assert.IsFalse(cs.HasChannels());
             var c1 = cs.GetChannel(ChannelType.ControlChannel, "ctl1", true, false);
+            Assert.IsTrue(cs.HasChannels());
             Assert.IsNotNull(c1);
             Assert.IsTrue(c1.IsInput);
             Assert.IsFalse(c1.IsOutput);
@@ -276,6 +282,18 @@ namespace TestCsound64Component
             var ca1 = cs.GetChannel(ChannelType.AudioChannel, "aud1", true, true);
             ca1.Value = data;
             var data1 = ca1.Value;
+
+            var infos = cs.ListChannels();
+            Assert.IsNotNull(infos);
+            var cnt = infos.Count;
+            Assert.AreEqual(4, cnt);
+            var names = infos.Keys;
+            foreach (var ss in infos)
+            {
+                var x = ss;
+            }
+
+
             var msg = new StringBuilder();
             MessageAttrs attrs;
             while (cs.HasMessages()) { msg.Append(cs.NextMessage(out attrs)); }
@@ -436,6 +454,141 @@ namespace TestCsound64Component
 
         }
 
+        [TestMethod]
+        public void TestMidiBuffers()
+        {
+            var cs = new Csound64();
+            cs.OpenMidiDataStream("In", 1024);
+            cs.Start(480);
+            var no = new MidiNoteOnMessage(0, 64, 64);
+            var nor = no.RawData.ToArray();
+
+            Assert.AreEqual(3, cs.AppendMidiData("In", nor));
+            
+            var data = new byte[3];
+            Assert.AreEqual(3,cs.ReceiveMidiData("In", data));
+            for (int i=0; i<data.Length; ++i)
+            {
+                Assert.AreEqual(nor[i], data[i]);
+            }
+            
+        }
+
+        [TestMethod]
+        public async Task TestMidiInput()
+        {
+            var midiInputQueryString = MidiInPort.GetDeviceSelector();
+            var midiInputDevices = await DeviceInformation.FindAllAsync(midiInputQueryString);
+            Assert.IsNotNull(midiInputDevices);
+            Assert.IsTrue(midiInputDevices.Count > 0);
+            DeviceInformation devInfo = null;
+            foreach (var info in midiInputDevices)
+            {
+                if (info.Name == "USB Axiom 25 [1]") devInfo = info;
+            }
+            Assert.IsNotNull(devInfo, "Expected Midi Device is not active");
+            var devid = devInfo.Id;
+            var inport = await MidiInPort.FromIdAsync(devid);
+
+            var settings = new AudioGraphSettings(Windows.Media.Render.AudioRenderCategory.Media);
+            var aresult = await AudioGraph.CreateAsync(settings);
+            Assert.IsTrue(AudioGraphCreationStatus.Success == aresult.Status);
+            var audio = aresult.Graph;
+
+            var oresult = await audio.CreateDeviceOutputNodeAsync();
+            Assert.IsTrue(oresult.Status == AudioDeviceNodeCreationStatus.Success);
+            var output = oresult.DeviceOutputNode;
+
+            var cs = new CsoundRunner();
+            Assert.IsNotNull(cs);
+            var input = cs.AttchNode(audio);
+            Assert.IsNotNull(input);
+            input.AddOutgoingConnection(output);
+
+            var csdfile = await StorageFile.GetFileFromApplicationUriAsync(new Uri("ms-appx:///Data/notnum.csd"));
+            Assert.IsNotNull(csdfile);
+            var csdtext = await FileIO.ReadTextAsync(csdfile);
+            Assert.IsFalse(string.IsNullOrEmpty(csdtext));
+            Assert.IsTrue(cs.CompileCsdForPlay(csdtext) == CsoundStatus.OK);
+
+            inport.MessageReceived += (sender, args) =>
+            {
+                cs.AppendMidiData("0", args.Message.RawData.ToArray());
+            };
+
+
+            var done = cs.Start();
+            output.Start();
+            input.Start();
+            audio.Start();
+            //await Task.Delay(1);
+            await done; //wait for csound to finish
+            var msg = cs.GetMessages();
+
+            output.Stop();
+            input.Stop();
+            cs.Stop();
+            audio.Stop();
+
+            cs.Dispose();
+        }
+
+        [TestMethod]
+        public async Task TestMidiOut()
+        {
+            var midiOutputQueryString = MidiOutPort.GetDeviceSelector();
+            var midiOutputDevices = await DeviceInformation.FindAllAsync(midiOutputQueryString);
+            Assert.IsNotNull(midiOutputDevices);
+            Assert.IsTrue(midiOutputDevices.Count > 0);
+            DeviceInformation devInfo = null;
+            foreach (var info in midiOutputDevices)
+            {
+                if (info.Name == "Microsoft GS Wavetable Synth") devInfo = info;
+            }
+            Assert.IsNotNull(devInfo, "Microsoft GS Synthesizer not found for midi out tests");
+
+            var settings = new AudioGraphSettings(Windows.Media.Render.AudioRenderCategory.Media);
+            var aresult = await AudioGraph.CreateAsync(settings);
+            Assert.IsTrue(AudioGraphCreationStatus.Success == aresult.Status);
+            var audio = aresult.Graph;
+
+            var oresult = await audio.CreateDeviceOutputNodeAsync();
+            Assert.IsTrue(oresult.Status == AudioDeviceNodeCreationStatus.Success);
+            var output = oresult.DeviceOutputNode;
+
+            var cs = new CsoundRunner();
+            Assert.IsNotNull(cs);
+            var input = cs.AttchNode(audio);
+            Assert.IsNotNull(input);
+            input.AddOutgoingConnection(output);
+
+            Assert.IsTrue(await cs.AttachMidiOutPort(devInfo.Id));
+
+            var csdfile = await StorageFile.GetFileFromApplicationUriAsync(new Uri("ms-appx:///Data/moscil.csd"));
+            Assert.IsNotNull(csdfile);
+            var csdtext = await FileIO.ReadTextAsync(csdfile);
+            Assert.IsFalse(string.IsNullOrEmpty(csdtext));
+            var result = cs.CompileCsdForPlay(csdtext);
+            Assert.IsTrue(result == CsoundStatus.OK, cs.GetMessages().ToString());
+
+            var done = cs.Start();
+            output.Start();
+            input.Start();
+            audio.Start();
+            //await Task.Delay(1);
+            await done; //wait for csound to finish
+            var msg = cs.GetMessages();
+
+            output.Stop();
+            input.Stop();
+            cs.Stop();
+            audio.Stop();
+            msg = cs.GetMessages();
+            cs.Stop();
+            cs.Dispose();
+
+
+        }
 
 
         /************************************************************************************************************/
@@ -462,6 +615,7 @@ namespace TestCsound64Component
         {
             Csound64 m_csound = new Csound64();
             AudioFrameInputNode m_inputNode = null;
+            IMidiOutPort m_outputMidiPort = null;
             TaskCompletionSource<bool> m_done;
             int m_frameCount = 0;
 
@@ -481,6 +635,18 @@ namespace TestCsound64Component
                 return m_inputNode;
             }
 
+            public async Task<bool> AttachMidiOutPort(string devid)
+            {
+                m_outputMidiPort = await MidiOutPort.FromIdAsync(devid);
+                m_csound.MidiDataAvailable += OnMidiOutRequested;
+                return m_outputMidiPort != null;
+            }
+
+            public CsoundStatus CompileCsdForPlay(string csd)
+            {
+                return m_csound.CompileCsd(csd);
+            }
+
             public CsoundStatus CompileForPlay(string orc, string sco)
             {
                 var result = m_csound.CompileOrc(orc);
@@ -496,6 +662,19 @@ namespace TestCsound64Component
                 var status = (m_csound != null)  ? m_csound.Start(m_frameCount) : CsoundStatus.UnspecifiedError;
                 m_done = new TaskCompletionSource<bool>();
                 return m_done.Task;
+            }
+
+            public int AppendMidiData(string id, byte[] data)
+            {
+                return m_csound.AppendMidiData(id, data);
+            }
+
+            public void OnMidiOutRequested(Csound64 source, MidiDataAvailableEventArgs args)
+            {
+                if (m_outputMidiPort != null)
+                {
+                    m_outputMidiPort.SendBuffer(args.MidiData.AsBuffer());
+                }
             }
 
             public double ScoreTime { get { return m_csound.ScoreTimeInSeconds; } }

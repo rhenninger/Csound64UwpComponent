@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="..\packages\Microsoft.Windows.CppWinRT.2.0.190730.2\build\native\Microsoft.Windows.CppWinRT.props" Condition="Exists('..\packages\Microsoft.Windows.CppWinRT.2.0.190730.2\build\native\Microsoft.Windows.CppWinRT.props')" />
   <PropertyGroup Label="Globals">
@@ -76,6 +76,9 @@
     <IncludePath>C:\Program Files\Csound6_x64\include\csound;$(IncludePath)</IncludePath>
     <LibraryPath>C:\Program Files\Csound6_x64\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <IncludePath>C:\Users\rghmu\source\repos\csound6.13\csound-6.13.0\include;$(IncludePath)</IncludePath>
+  </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
       <PrecompiledHeader>Use</PrecompiledHeader>
@@ -116,6 +119,7 @@
     <ClInclude Include="CsoundParameters.h" />
     <ClInclude Include="CsoundStringChannel.h" />
     <ClInclude Include="CsoundTable.h" />
+    <ClInclude Include="MidiDataAvailableEventArgs.h" />
     <ClInclude Include="pch.h" />
   </ItemGroup>
   <ItemGroup>
@@ -125,6 +129,7 @@
     <ClCompile Include="CsoundParameters.cpp" />
     <ClCompile Include="CsoundStringChannel.cpp" />
     <ClCompile Include="CsoundTable.cpp" />
+    <ClCompile Include="MidiDataAvailableEventArgs.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
@@ -135,6 +140,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="Csound64UwpComponent.def" />
+    <None Include="README.md" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

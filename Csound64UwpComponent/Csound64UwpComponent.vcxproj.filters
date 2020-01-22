@@ -18,6 +18,7 @@
     <ClCompile Include="CsoundControlChannel.cpp" />
     <ClCompile Include="CsoundStringChannel.cpp" />
     <ClCompile Include="CsoundAudioChannel.cpp" />
+    <ClCompile Include="MidiDataAvailableEventArgs.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h" />
@@ -27,6 +28,7 @@
     <ClInclude Include="CsoundControlChannel.h" />
     <ClInclude Include="CsoundStringChannel.h" />
     <ClInclude Include="CsoundAudioChannel.h" />
+    <ClInclude Include="MidiDataAvailableEventArgs.h" />
   </ItemGroup>
   <ItemGroup>
     <Midl Include="Csound64.idl" />
@@ -34,6 +36,7 @@
   <ItemGroup>
     <None Include="Csound64UwpComponent.def" />
     <None Include="packages.config" />
+    <None Include="README.md" />
   </ItemGroup>
   <ItemGroup>
     <None Include="PropertySheet.props" />
