@@ -36,8 +36,8 @@ The entire project is developed in the
 ["Csound64.idl"](https://docs.microsoft.com/en-us/uwp/midl-3/) file.
 This is then used to generate a Windows 10 metadata file: "Csound64.winmd"
 as well as signatures to use in the *c++* headers and source files used to develop these components.
-The build's resulting ".dll", ".lib",".winmd" along with *Csound*'s "csound64.dll"
-file (assuming a shell path variable that points to *csound*'s "/bin" directory) is enough
+The build's resulting ".dll", ".winmd" and a copy of *Csound*'s "csound64.dll"
+file (assuming a shell path variable that points to *csound*'s "/bin" directory to find the rest) is enough
 to start programming a UWP app using *Csound* for its audio engine.
 
  
